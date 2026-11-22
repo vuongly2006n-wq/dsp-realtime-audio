@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>DSP Real-Time Audio Studio</title>
+    <title>DSP Real-Time Audio</title>
     <style>
         * { box-sizing: border-box; font-family: system-ui, -apple-system, sans-serif; }
         body {
@@ -16,7 +16,7 @@
         }
         .app {
             width: 100%;
-            max-width: 500px;
+            max-width: 480px;
             display: flex;
             flex-direction: column;
             gap: 12px;
@@ -29,10 +29,9 @@
             box-shadow: 0 8px 20px rgba(0, 0, 0, 0.35);
         }
         h1 {
-            margin: 0 0 6px 0;
+            margin: 0 0 8px 0;
             font-size: 1.15rem;
             text-align: center;
-            letter-spacing: 0.4px;
             color: #f8fafc;
         }
         .section-title {
@@ -43,51 +42,26 @@
             color: #94a3b8;
             margin: 0 0 10px 0;
         }
-        .warn {
-            background: #422006;
-            color: #fde68a;
-            border: 1px solid #a16207;
-            border-radius: 8px;
-            padding: 7px 10px;
-            font-size: 0.78rem;
-            text-align: center;
-            margin-bottom: 12px;
-        }
-        .row {
-            display: flex;
-            gap: 8px;
-            align-items: center;
-        }
         button, .file-btn {
             border: none;
             border-radius: 10px;
-            padding: 11px 10px;
-            font-size: 0.88rem;
+            padding: 12px 10px;
+            font-size: 0.92rem;
             font-weight: 600;
             cursor: pointer;
             color: #fff;
             text-align: center;
-            transition: transform 0.08s ease;
+            width: 100%;
         }
-        button:active, .file-btn:active { transform: scale(0.98); }
-        .btn-mic { flex: 1.25; background: #2563eb; }
+        .btn-mic { background: #2563eb; }
         .btn-mic.active { background: #dc2626; }
-        .btn-rec { flex: 1; background: #334155; border: 1px solid #475569; }
-        .btn-rec.recording {
-            background: #b91c1c;
-            border-color: #ef4444;
-            animation: pulse 1.2s infinite;
-        }
-        @keyframes pulse {
-            0%, 100% { opacity: 1; }
-            50% { opacity: 0.7; }
-        }
         .rec-meta {
             display: flex;
             justify-content: space-between;
-            margin-top: 8px;
-            font-size: 0.78rem;
-            color: #94a3b8;
+            align-items: center;
+            margin-top: 10px;
+            font-size: 0.82rem;
+            color: #cbd5e1;
         }
         .rec-timer {
             font-variant-numeric: tabular-nums;
@@ -99,7 +73,7 @@
             justify-content: space-between;
             font-size: 0.78rem;
             color: #94a3b8;
-            margin: 10px 0 6px 0;
+            margin: 12px 0 6px 0;
         }
         .vu-leds {
             display: grid;
@@ -115,13 +89,43 @@
             border-radius: 3px;
             background: #1e293b;
         }
-        .vu-seg.on[data-zone="green"] { background: #22c55e; box-shadow: 0 0 6px rgba(34, 197, 94, 0.5); }
-        .vu-seg.on[data-zone="yellow"] { background: #eab308; box-shadow: 0 0 6px rgba(234, 179, 8, 0.5); }
-        .vu-seg.on[data-zone="red"] { background: #ef4444; box-shadow: 0 0 8px rgba(239, 68, 68, 0.7); }
+        .vu-seg.on[data-zone="green"] { background: #22c55e; }
+        .vu-seg.on[data-zone="yellow"] { background: #eab308; }
+        .vu-seg.on[data-zone="red"] { background: #ef4444; }
+
+        .effect-grid {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 7px;
+            margin-bottom: 12px;
+        }
+        .effect-btn {
+            background: #0f172a;
+            border: 1px solid #334155;
+            color: #cbd5e1;
+            padding: 10px 4px;
+            font-size: 0.82rem;
+        }
+        .effect-btn.active {
+            background: #0284c7;
+            border-color: #38bdf8;
+            color: #fff;
+        }
+        .slider-label {
+            display: flex;
+            justify-content: space-between;
+            font-size: 0.85rem;
+            color: #cbd5e1;
+            margin-bottom: 4px;
+        }
+        input[type="range"] {
+            width: 100%;
+            accent-color: #38bdf8;
+            cursor: pointer;
+        }
 
         .file-btn {
             display: block;
-            width: 100%;
             background: #1e293b;
             border: 1px dashed #475569;
             color: #e2e8f0;
@@ -131,58 +135,21 @@
         .source-info {
             font-size: 0.8rem;
             color: #38bdf8;
-            margin-bottom: 8px;
+            margin-bottom: 10px;
             font-weight: 600;
-            white-space: nowrap;
-            overflow: hidden;
-            text-overflow: ellipsis;
+            word-break: break-word;
         }
-        .time-row {
+        .play-row {
             display: flex;
-            justify-content: space-between;
-            font-size: 0.76rem;
+            align-items: center;
+            gap: 10px;
+        }
+        .btn-play { flex: 1; background: #16a34a; }
+        .time-display {
+            font-size: 0.82rem;
             color: #94a3b8;
             font-variant-numeric: tabular-nums;
-            margin: 2px 0 10px 0;
-        }
-        .transport { display: flex; gap: 8px; }
-        .btn-seek { flex: 1; background: #1e293b; border: 1px solid #334155; }
-        .btn-play { flex: 1.5; background: #16a34a; }
-
-        .preset-grid {
-            display: grid;
-            grid-template-columns: repeat(3, 1fr);
-            gap: 7px;
-            margin-bottom: 12px;
-        }
-        .preset-btn {
-            background: #0f172a;
-            border: 1px solid #334155;
-            color: #cbd5e1;
-            padding: 9px 6px;
-            font-size: 0.78rem;
-            border-radius: 8px;
-        }
-        .preset-btn.active {
-            background: #0284c7;
-            border-color: #38bdf8;
-            color: #fff;
-        }
-
-        .slider-group { margin-bottom: 9px; }
-        .slider-group:last-child { margin-bottom: 0; }
-        .slider-label {
-            display: flex;
-            justify-content: space-between;
-            font-size: 0.82rem;
-            color: #cbd5e1;
-            margin-bottom: 3px;
-        }
-        input[type="range"] {
-            width: 100%;
-            accent-color: #38bdf8;
-            cursor: pointer;
-            margin: 0;
+            white-space: nowrap;
         }
 
         .export-grid {
@@ -192,7 +159,7 @@
         }
         .btn-exp {
             background: #0f766e;
-            font-size: 0.8rem;
+            font-size: 0.82rem;
             padding: 10px 6px;
         }
         .exp-note {
@@ -206,7 +173,6 @@
             font-size: 0.76rem;
             color: #94a3b8;
             line-height: 1.5;
-            padding: 4px 0 10px 0;
         }
         .footer strong { color: #38bdf8; }
     </style>
@@ -214,17 +180,12 @@
 <body>
     <div class="app">
         <div class="card">
-            <h1>DSP REAL-TIME AUDIO STUDIO</h1>
-            <div class="warn">Cắm tai nghe khi bật Micro Live. Nếu bấm Thu giọng nói, loa tự ngắt chống hú rồi phát xử lý trực tiếp.</div>
-
-            <div class="row">
-                <button id="btnMic" class="btn-mic">Bật Micro Karaoke</button>
-                <button id="btnRec" class="btn-rec">Thu giọng nói</button>
-            </div>
+            <h1>DSP REAL-TIME AUDIO</h1>
+            <button id="btnMicRec" class="btn-mic">Bật Micro &amp; Thu giọng</button>
 
             <div class="rec-meta">
-                <span>Thu mộc xong tự nạp vào bộ lọc DSP</span>
-                <span>Thời gian thu: <span id="recTimer" class="rec-timer">00:00</span></span>
+                <label><input type="checkbox" id="chkMonitor" checked> Nghe trực tiếp (cần tai nghe)</label>
+                <span>Thời gian: <span id="recTimer" class="rec-timer">00:00</span></span>
             </div>
 
             <div class="vu-header">
@@ -235,77 +196,42 @@
         </div>
 
         <div class="card">
+            <div class="section-title">3 Hiệu Ứng DSP Chính</div>
+            <div class="effect-grid">
+                <button class="effect-btn" data-effect="dry">Gốc</button>
+                <button class="effect-btn active" data-effect="echo">Echo</button>
+                <button class="effect-btn" data-effect="reverb">Reverb</button>
+                <button class="effect-btn" data-effect="flanger">Flanger</button>
+            </div>
+            <div class="slider-label">
+                <span>Hệ số Gain (g)</span>
+                <span id="gainVal">0.50</span>
+            </div>
+            <input type="range" id="gainSlider" min="0" max="1" step="0.05" value="0.5">
+        </div>
+
+        <div class="card">
             <div class="section-title">Nạp File .WAV &amp; Phát Xử Lý Trực Tiếp</div>
             <label class="file-btn">
                 + Nạp file âm thanh (.wav)
-                <input type="file" id="wavFileInput" accept=".wav,audio/*">
+                <input type="file" id="wavFileInput" accept=".wav,audio/wav,audio/*">
             </label>
-
-            <div id="sourceInfo" class="source-info">Chưa có tín hiệu — Hãy nạp file .wav hoặc bấm Thu giọng nói</div>
-
-            <input type="range" id="seekBar" min="0" max="100" step="0.1" value="0">
-            <div class="time-row">
-                <span id="curTime">00:00</span>
-                <span id="durTime">00:00</span>
-            </div>
-
-            <div class="transport">
-                <button id="btnBack" class="btn-seek">⏪ -5s</button>
+            <div id="sourceInfo" class="source-info">Chưa có tín hiệu — Nạp file .wav hoặc thu giọng ở trên</div>
+            <div class="play-row">
                 <button id="btnPlayPause" class="btn-play">▶ Phát</button>
-                <button id="btnForward" class="btn-seek">⏩ +5s</button>
+                <span id="timeDisplay" class="time-display">00:00 / 00:00</span>
             </div>
             <audio id="playerAudio" preload="auto"></audio>
         </div>
 
         <div class="card">
-            <div class="section-title">5 Preset Bối Cảnh &amp; 3 Hiệu Ứng DSP</div>
-            <div class="preset-grid">
-                <button class="preset-btn" data-preset="dry">Giọng Mộc</button>
-                <button class="preset-btn active" data-preset="karaoke">Karaoke KTV</button>
-                <button class="preset-btn" data-preset="studio">Podcast / MC</button>
-                <button class="preset-btn" data-preset="hall">Hội trường</button>
-                <button class="preset-btn" data-preset="cave">Hang động</button>
-                <button class="preset-btn" data-preset="robot">Robot / Flanger</button>
-            </div>
-
-            <div class="slider-group">
-                <div class="slider-label"><span>Echo (FIR, D = 0.3s)</span><span id="echoVal">0.35</span></div>
-                <input type="range" id="echoSlider" min="0" max="1" step="0.05" value="0.35">
-            </div>
-            <div class="slider-group">
-                <div class="slider-label"><span>Reverb (4-Comb IIR, g &lt; 1)</span><span id="reverbVal">0.72</span></div>
-                <input type="range" id="reverbSlider" min="0" max="0.94" step="0.02" value="0.72">
-            </div>
-            <div class="slider-group">
-                <div class="slider-label"><span>Flanger (FIR LTV, 1–5 ms)</span><span id="flangerVal">0.00</span></div>
-                <input type="range" id="flangerSlider" min="0" max="1" step="0.05" value="0">
-            </div>
-        </div>
-
-        <div class="card">
-            <div class="section-title">Tăng Giảm Âm Lượng</div>
-            <div class="slider-group">
-                <div class="slider-label"><span>Âm lượng Micro Live</span><span id="micVolVal">100%</span></div>
-                <input type="range" id="micVolSlider" min="0" max="1.5" step="0.05" value="1">
-            </div>
-            <div class="slider-group">
-                <div class="slider-label"><span>Âm lượng File / Bản thu</span><span id="playerVolVal">100%</span></div>
-                <input type="range" id="playerVolSlider" min="0" max="1.5" step="0.05" value="1">
-            </div>
-            <div class="slider-group">
-                <div class="slider-label"><span>Âm lượng Tổng (Master)</span><span id="masterVolVal">100%</span></div>
-                <input type="range" id="masterVolSlider" min="0" max="1.5" step="0.05" value="1">
-            </div>
-        </div>
-
-        <div class="card">
-            <div class="section-title">Xuất File .WAV Theo 3 Hiệu Ứng Gốc</div>
+            <div class="section-title">Xuất File .WAV Theo 3 Hiệu Ứng</div>
             <div class="export-grid">
                 <button id="btnExportEcho" class="btn-exp">Xuất Echo</button>
                 <button id="btnExportReverb" class="btn-exp">Xuất Reverb</button>
                 <button id="btnExportFlanger" class="btn-exp">Xuất Flanger</button>
             </div>
-            <div id="exportStatus" class="exp-note">Áp dụng cho file .wav đã nạp hoặc bản thu giọng nói</div>
+            <div id="exportStatus" class="exp-note">Áp dụng cho file .wav đã nạp hoặc giọng vừa thu</div>
         </div>
 
         <div class="footer">
@@ -314,6 +240,6 @@
         </div>
     </div>
 
-    <script src="app.js"></script>
+    <script src="app.js?v=3"></script>
 </body>
 </html>

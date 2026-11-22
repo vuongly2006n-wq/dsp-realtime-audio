@@ -1,22 +1,17 @@
 let audioCtx = null;
 let workletLoaded = false;
 let dspNode = null;
-let playerGainNode = null;
-let masterGainNode = null;
 let masterAnalyser = null;
 let mediaElSource = null;
 
 let micStream = null;
 let micSource = null;
-let micGainNode = null;
-let micActive = false;
-
-let recStream = null;
-let recSource = null;
+let micLiveGain = null;
 let recNode = null;
 let recSilentSink = null;
 let recAnalyser = null;
-let isRecording = false;
+
+let micRecActive = false;
 let recChunks = [];
 let recTimerId = null;
 let recStartTime = 0;
@@ -24,80 +19,22 @@ let stopRecResolve = null;
 
 let vuAnimId = null;
 let smoothedDb = -60;
-let isSeeking = false;
 let currentSourceUrl = null;
 let loadedSignal = null;
 
 const COMB_DELAY_MS = [29.7, 37.1, 41.1, 43.7];
-
-const PRESETS = {
-    dry: {
-        name: 'Giọng Mộc',
-        echoGain: 0.0,
-        echoDelayMs: 300,
-        reverbGain: 0.0,
-        reverbMix: 0.0,
-        flangerGain: 0.0,
-        flangerRate: 0.25,
-        flangerDepthMs: 2.0
-    },
-    karaoke: {
-        name: 'Karaoke KTV',
-        echoGain: 0.35,
-        echoDelayMs: 220,
-        reverbGain: 0.72,
-        reverbMix: 0.45,
-        flangerGain: 0.0,
-        flangerRate: 0.25,
-        flangerDepthMs: 2.0
-    },
-    studio: {
-        name: 'Podcast / MC',
-        echoGain: 0.0,
-        echoDelayMs: 180,
-        reverbGain: 0.45,
-        reverbMix: 0.22,
-        flangerGain: 0.0,
-        flangerRate: 0.25,
-        flangerDepthMs: 2.0
-    },
-    hall: {
-        name: 'Hội trường',
-        echoGain: 0.15,
-        echoDelayMs: 300,
-        reverbGain: 0.90,
-        reverbMix: 0.65,
-        flangerGain: 0.0,
-        flangerRate: 0.25,
-        flangerDepthMs: 2.0
-    },
-    cave: {
-        name: 'Hang động',
-        echoGain: 0.65,
-        echoDelayMs: 320,
-        reverbGain: 0.80,
-        reverbMix: 0.50,
-        flangerGain: 0.0,
-        flangerRate: 0.25,
-        flangerDepthMs: 2.0
-    },
-    robot: {
-        name: 'Robot / Flanger',
-        echoGain: 0.30,
-        echoDelayMs: 45,
-        reverbGain: 0.30,
-        reverbMix: 0.20,
-        flangerGain: 0.90,
-        flangerRate: 2.2,
-        flangerDepthMs: 1.8
-    }
+const DEFAULT_GAINS = {
+    dry: 0.0,
+    echo: 0.5,
+    reverb: 0.85,
+    flanger: 0.7
 };
 
-let currentPreset = 'karaoke';
-let dspState = { ...PRESETS.karaoke };
+let currentEffect = 'echo';
+let currentGain = 0.5;
 
-const btnMic = document.getElementById('btnMic');
-const btnRec = document.getElementById('btnRec');
+const btnMicRec = document.getElementById('btnMicRec');
+const chkMonitor = document.getElementById('chkMonitor');
 const recTimer = document.getElementById('recTimer');
 const vuLeds = document.getElementById('vuLeds');
 const vuDb = document.getElementById('vuDb');
@@ -106,27 +43,12 @@ const vuSourceLabel = document.getElementById('vuSourceLabel');
 const wavFileInput = document.getElementById('wavFileInput');
 const sourceInfo = document.getElementById('sourceInfo');
 const playerAudio = document.getElementById('playerAudio');
-const seekBar = document.getElementById('seekBar');
-const curTimeEl = document.getElementById('curTime');
-const durTimeEl = document.getElementById('durTime');
-const btnBack = document.getElementById('btnBack');
 const btnPlayPause = document.getElementById('btnPlayPause');
-const btnForward = document.getElementById('btnForward');
+const timeDisplay = document.getElementById('timeDisplay');
 
-const presetBtns = document.querySelectorAll('.preset-btn');
-const echoSlider = document.getElementById('echoSlider');
-const echoVal = document.getElementById('echoVal');
-const reverbSlider = document.getElementById('reverbSlider');
-const reverbVal = document.getElementById('reverbVal');
-const flangerSlider = document.getElementById('flangerSlider');
-const flangerVal = document.getElementById('flangerVal');
-
-const micVolSlider = document.getElementById('micVolSlider');
-const micVolVal = document.getElementById('micVolVal');
-const playerVolSlider = document.getElementById('playerVolSlider');
-const playerVolVal = document.getElementById('playerVolVal');
-const masterVolSlider = document.getElementById('masterVolSlider');
-const masterVolVal = document.getElementById('masterVolVal');
+const effectBtns = document.querySelectorAll('.effect-btn');
+const gainSlider = document.getElementById('gainSlider');
+const gainVal = document.getElementById('gainVal');
 
 const btnExportEcho = document.getElementById('btnExportEcho');
 const btnExportReverb = document.getElementById('btnExportReverb');
@@ -141,6 +63,7 @@ const ledElements = [];
 
 function initVuMeter() {
     vuLeds.innerHTML = '';
+    ledElements.length = 0;
     for (let i = 0; i < LED_COUNT; i++) {
         const seg = document.createElement('div');
         seg.className = 'vu-seg';
@@ -163,10 +86,8 @@ function renderVuLevel(db) {
 }
 
 function updateVuLoop() {
-    const activeAnalyser = isRecording ? recAnalyser : masterAnalyser;
-    vuSourceLabel.textContent = isRecording
-        ? 'VU Meter (Đang thu giọng nói mộc)'
-        : 'VU Meter (Đầu ra DSP)';
+    const activeAnalyser = (micRecActive && !chkMonitor.checked) ? recAnalyser : masterAnalyser;
+    vuSourceLabel.textContent = micRecActive ? 'VU Meter (Micro)' : 'VU Meter (Đầu ra DSP)';
 
     if (activeAnalyser) {
         const buf = new Float32Array(activeAnalyser.fftSize);
@@ -189,7 +110,7 @@ async function ensureAudioGraph() {
         audioCtx = new AudioContextClass({ latencyHint: 'interactive' });
     }
     if (!workletLoaded) {
-        await audioCtx.audioWorklet.addModule('dsp-processor.js');
+        await audioCtx.audioWorklet.addModule('dsp-processor.js?v=3');
         workletLoaded = true;
     }
     if (!dspNode) {
@@ -199,22 +120,14 @@ async function ensureAudioGraph() {
             outputChannelCount: [2]
         });
 
-        masterGainNode = audioCtx.createGain();
-        masterGainNode.gain.value = parseFloat(masterVolSlider.value);
-
         masterAnalyser = audioCtx.createAnalyser();
         masterAnalyser.fftSize = 512;
 
-        dspNode.connect(masterGainNode);
-        masterGainNode.connect(masterAnalyser);
+        dspNode.connect(masterAnalyser);
         masterAnalyser.connect(audioCtx.destination);
 
         mediaElSource = audioCtx.createMediaElementSource(playerAudio);
-        playerGainNode = audioCtx.createGain();
-        playerGainNode.gain.value = parseFloat(playerVolSlider.value);
-
-        mediaElSource.connect(playerGainNode);
-        playerGainNode.connect(dspNode);
+        mediaElSource.connect(dspNode);
 
         sendDspParams(true);
 
@@ -234,136 +147,45 @@ function sendDspParams(reset = false) {
     if (!dspNode) return;
     dspNode.port.postMessage({
         reset,
-        echoGain: dspState.echoGain,
-        echoDelayMs: dspState.echoDelayMs,
-        reverbGain: dspState.reverbGain,
-        reverbMix: dspState.reverbMix,
-        flangerGain: dspState.flangerGain,
-        flangerRate: dspState.flangerRate,
-        flangerDepthMs: dspState.flangerDepthMs
+        effect: currentEffect,
+        gain: currentGain
     });
 }
 
-function applyPreset(key) {
-    const p = PRESETS[key];
-    if (!p) return;
-    currentPreset = key;
-    dspState = { ...p };
-
-    presetBtns.forEach(btn => {
-        btn.classList.toggle('active', btn.dataset.preset === key);
+function selectEffect(eff) {
+    currentEffect = eff;
+    effectBtns.forEach(btn => {
+        btn.classList.toggle('active', btn.dataset.effect === eff);
     });
 
-    echoSlider.value = dspState.echoGain.toFixed(2);
-    echoVal.textContent = dspState.echoGain.toFixed(2);
-    reverbSlider.value = dspState.reverbGain.toFixed(2);
-    reverbVal.textContent = dspState.reverbGain.toFixed(2);
-    flangerSlider.value = dspState.flangerGain.toFixed(2);
-    flangerVal.textContent = dspState.flangerGain.toFixed(2);
+    if (eff === 'reverb') {
+        gainSlider.max = '0.95';
+    } else {
+        gainSlider.max = '1.00';
+    }
 
-    sendDspParams(key === 'dry');
+    currentGain = DEFAULT_GAINS[eff];
+    gainSlider.value = currentGain.toFixed(2);
+    gainVal.textContent = currentGain.toFixed(2);
+    gainSlider.disabled = (eff === 'dry');
+
+    sendDspParams(true);
 }
 
-presetBtns.forEach(btn => {
-    btn.addEventListener('click', () => applyPreset(btn.dataset.preset));
+effectBtns.forEach(btn => {
+    btn.addEventListener('click', () => selectEffect(btn.dataset.effect));
 });
 
-echoSlider.addEventListener('input', () => {
-    dspState.echoGain = parseFloat(echoSlider.value);
-    dspState.echoDelayMs = 300;
-    echoVal.textContent = dspState.echoGain.toFixed(2);
+gainSlider.addEventListener('input', () => {
+    currentGain = parseFloat(gainSlider.value);
+    gainVal.textContent = currentGain.toFixed(2);
     sendDspParams(false);
 });
 
-reverbSlider.addEventListener('input', () => {
-    dspState.reverbGain = parseFloat(reverbSlider.value);
-    dspState.reverbMix = dspState.reverbGain > 0.01 ? Math.max(0.35, dspState.reverbGain * 0.65) : 0.0;
-    reverbVal.textContent = dspState.reverbGain.toFixed(2);
-    sendDspParams(false);
-});
-
-flangerSlider.addEventListener('input', () => {
-    dspState.flangerGain = parseFloat(flangerSlider.value);
-    dspState.flangerRate = 0.25;
-    dspState.flangerDepthMs = 2.0;
-    flangerVal.textContent = dspState.flangerGain.toFixed(2);
-    sendDspParams(false);
-});
-
-micVolSlider.addEventListener('input', () => {
-    const v = parseFloat(micVolSlider.value);
-    micVolVal.textContent = `${Math.round(v * 100)}%`;
-    if (micGainNode) micGainNode.gain.value = v;
-});
-
-playerVolSlider.addEventListener('input', () => {
-    const v = parseFloat(playerVolSlider.value);
-    playerVolVal.textContent = `${Math.round(v * 100)}%`;
-    if (playerGainNode) playerGainNode.gain.value = v;
-});
-
-masterVolSlider.addEventListener('input', () => {
-    const v = parseFloat(masterVolSlider.value);
-    masterVolVal.textContent = `${Math.round(v * 100)}%`;
-    if (masterGainNode) masterGainNode.gain.value = v;
-});
-
-async function startMic() {
-    if (isRecording) await stopDryRecording();
-    try {
-        statusText.textContent = 'Đang xin quyền Micro...';
-        await ensureAudioGraph();
-
-        micStream = await navigator.mediaDevices.getUserMedia({
-            audio: {
-                echoCancellation: false,
-                noiseSuppression: false,
-                autoGainControl: false
-            }
-        });
-
-        micSource = audioCtx.createMediaStreamSource(micStream);
-        micGainNode = audioCtx.createGain();
-        micGainNode.gain.value = parseFloat(micVolSlider.value);
-
-        micSource.connect(micGainNode);
-        micGainNode.connect(dspNode);
-
-        sendDspParams(true);
-        micActive = true;
-        btnMic.textContent = 'Tắt Micro Karaoke';
-        btnMic.classList.add('active');
-        statusText.textContent = `Micro Live đang chạy (${PRESETS[currentPreset].name})`;
-    } catch (err) {
-        statusText.textContent = 'Lỗi Micro: ' + err.message;
-        stopMic();
+chkMonitor.addEventListener('change', () => {
+    if (micLiveGain) {
+        micLiveGain.gain.value = chkMonitor.checked ? 1.0 : 0.0;
     }
-}
-
-function stopMic() {
-    if (micSource) {
-        try { micSource.disconnect(); } catch (e) {}
-        micSource = null;
-    }
-    if (micGainNode) {
-        try { micGainNode.disconnect(); } catch (e) {}
-        micGainNode = null;
-    }
-    if (micStream) {
-        micStream.getTracks().forEach(t => t.stop());
-        micStream = null;
-    }
-    micActive = false;
-    btnMic.textContent = 'Bật Micro Karaoke';
-    btnMic.classList.remove('active');
-    if (!statusText.textContent.startsWith('Lỗi')) {
-        statusText.textContent = 'Micro Live đã tắt';
-    }
-}
-
-btnMic.addEventListener('click', () => {
-    if (micActive) stopMic();
-    else startMic();
 });
 
 function formatTime(sec) {
@@ -415,10 +237,9 @@ function loadSignalIntoPlayer(samples, sampleRate, displayName, autoPlay = false
     playerAudio.src = currentSourceUrl;
     playerAudio.load();
 
-    seekBar.value = 0;
-    curTimeEl.textContent = '00:00';
-    durTimeEl.textContent = formatTime(samples.length / sampleRate);
-    sourceInfo.textContent = `Đang nạp: ${displayName} (${sampleRate} Hz, ${(samples.length / sampleRate).toFixed(1)}s)`;
+    const durSec = samples.length / sampleRate;
+    timeDisplay.textContent = `00:00 / ${formatTime(durSec)}`;
+    sourceInfo.textContent = `Đang nạp: ${displayName} (${sampleRate} Hz, ${durSec.toFixed(1)}s)`;
     exportStatus.textContent = 'Sẵn sàng xuất 3 hiệu ứng (.wav)';
 
     if (autoPlay) {
@@ -426,15 +247,13 @@ function loadSignalIntoPlayer(samples, sampleRate, displayName, autoPlay = false
     }
 }
 
-async function startDryRecording() {
-    if (micActive) stopMic();
+async function startMicAndRec() {
     if (!playerAudio.paused) playerAudio.pause();
-
     try {
-        statusText.textContent = 'Đang mở Micro thu giọng nói...';
+        statusText.textContent = 'Đang xin quyền Micro...';
         await ensureAudioGraph();
 
-        recStream = await navigator.mediaDevices.getUserMedia({
+        micStream = await navigator.mediaDevices.getUserMedia({
             audio: {
                 echoCancellation: false,
                 noiseSuppression: false,
@@ -442,13 +261,16 @@ async function startDryRecording() {
             }
         });
 
-        recSource = audioCtx.createMediaStreamSource(recStream);
-        recNode = new AudioWorkletNode(audioCtx, 'dry-recorder-processor');
-        recSilentSink = audioCtx.createGain();
-        recSilentSink.gain.value = 0;
+        micSource = audioCtx.createMediaStreamSource(micStream);
+        micLiveGain = audioCtx.createGain();
+        micLiveGain.gain.value = chkMonitor.checked ? 1.0 : 0.0;
 
         recAnalyser = audioCtx.createAnalyser();
         recAnalyser.fftSize = 512;
+
+        recNode = new AudioWorkletNode(audioCtx, 'dry-recorder-processor');
+        recSilentSink = audioCtx.createGain();
+        recSilentSink.gain.value = 0;
 
         recChunks = [];
         recNode.port.onmessage = (e) => {
@@ -459,57 +281,63 @@ async function startDryRecording() {
             }
         };
 
-        recSource.connect(recNode);
-        recSource.connect(recAnalyser);
+        micSource.connect(micLiveGain);
+        micLiveGain.connect(dspNode);
+
+        micSource.connect(recAnalyser);
+        micSource.connect(recNode);
         recNode.connect(recSilentSink);
         recSilentSink.connect(audioCtx.destination);
 
+        sendDspParams(true);
         recNode.port.postMessage({ cmd: 'start' });
-        isRecording = true;
+
+        micRecActive = true;
         recStartTime = Date.now();
         recTimer.textContent = '00:00';
-        btnRec.textContent = 'Dừng thu & Xử lý';
-        btnRec.classList.add('recording');
-        statusText.textContent = 'Đang thu giọng nói (tự ngắt loa chống hú)...';
+        btnMicRec.textContent = 'Dừng Micro & Lưu giọng';
+        btnMicRec.classList.add('active');
+        statusText.textContent = chkMonitor.checked
+            ? 'Đang chạy Micro Karaoke + Thu giọng...'
+            : 'Đang thu giọng nói (tắt loa chống hú)...';
 
         recTimerId = setInterval(() => {
             recTimer.textContent = formatTime((Date.now() - recStartTime) / 1000);
         }, 200);
     } catch (err) {
-        statusText.textContent = 'Lỗi thu âm: ' + err.message;
-        cleanupRecNodes();
+        statusText.textContent = 'Lỗi Micro: ' + err.message;
+        cleanupMicNodes();
     }
 }
 
-function cleanupRecNodes() {
+function cleanupMicNodes() {
     if (recTimerId) {
         clearInterval(recTimerId);
         recTimerId = null;
     }
-    if (recSource) {
-        try { recSource.disconnect(); } catch (e) {}
-        recSource = null;
-    }
-    if (recNode) {
-        try { recNode.disconnect(); } catch (e) {}
-        recNode = null;
-    }
-    if (recSilentSink) {
-        try { recSilentSink.disconnect(); } catch (e) {}
-        recSilentSink = null;
-    }
-    if (recStream) {
-        recStream.getTracks().forEach(t => t.stop());
-        recStream = null;
-    }
+    [micSource, micLiveGain, recNode, recSilentSink].forEach(node => {
+        if (node) {
+            try { node.disconnect(); } catch (e) {}
+        }
+    });
+    micSource = null;
+    micLiveGain = null;
+    recNode = null;
+    recSilentSink = null;
     recAnalyser = null;
-    isRecording = false;
-    btnRec.textContent = 'Thu giọng nói';
-    btnRec.classList.remove('recording');
+
+    if (micStream) {
+        micStream.getTracks().forEach(t => t.stop());
+        micStream = null;
+    }
+
+    micRecActive = false;
+    btnMicRec.textContent = 'Bật Micro & Thu giọng';
+    btnMicRec.classList.remove('active');
 }
 
-async function stopDryRecording() {
-    if (!isRecording) return;
+async function stopMicAndRec() {
+    if (!micRecActive) return;
 
     await new Promise((resolve) => {
         stopRecResolve = resolve;
@@ -518,7 +346,7 @@ async function stopDryRecording() {
     });
 
     const sr = audioCtx.sampleRate;
-    cleanupRecNodes();
+    cleanupMicNodes();
 
     let totalLen = 0;
     for (const c of recChunks) totalLen += c.length;
@@ -546,19 +374,19 @@ async function stopDryRecording() {
 
     sendDspParams(true);
     loadSignalIntoPlayer(merged, sr, 'Giong_thu_am.wav', true);
-    statusText.textContent = `Đã thu xong — Đang phát qua DSP (${PRESETS[currentPreset].name})`;
+    statusText.textContent = `Đã lưu giọng thu — Đang phát trực tiếp qua hiệu ứng ${currentEffect.toUpperCase()}`;
 }
 
-btnRec.addEventListener('click', () => {
-    if (isRecording) stopDryRecording();
-    else startDryRecording();
+btnMicRec.addEventListener('click', () => {
+    if (micRecActive) stopMicAndRec();
+    else startMicAndRec();
 });
 
 wavFileInput.addEventListener('change', async (e) => {
     const file = e.target.files[0];
     if (!file) return;
     try {
-        statusText.textContent = `Đang giải mã ${file.name}...`;
+        statusText.textContent = `Đang nạp ${file.name}...`;
         await ensureAudioGraph();
         const arrayBuf = await file.arrayBuffer();
         const audioBuf = await audioCtx.decodeAudioData(arrayBuf);
@@ -574,57 +402,34 @@ wavFileInput.addEventListener('change', async (e) => {
         }
 
         loadSignalIntoPlayer(mono, audioBuf.sampleRate, file.name, false);
-        statusText.textContent = `Đã nạp ${file.name} — Bấm Phát để nghe hiệu ứng hoặc Xuất 3 file .wav`;
+        statusText.textContent = `Đã nạp ${file.name} — Bấm Phát hoặc Xuất 3 file .wav`;
     } catch (err) {
-        statusText.textContent = 'Không đọc được file âm thanh: ' + err.message;
+        statusText.textContent = 'Không đọc được file: ' + err.message;
+    } finally {
+        wavFileInput.value = '';
     }
 });
 
 btnPlayPause.addEventListener('click', async () => {
     if (!loadedSignal) {
-        statusText.textContent = 'Hãy nạp file .wav hoặc thu giọng nói trước!';
+        statusText.textContent = 'Hãy nạp file .wav hoặc bấm Bật Micro & Thu giọng trước!';
         return;
     }
-    await ensureAudioGraph();
-    if (playerAudio.paused) {
-        await playerAudio.play();
-    } else {
-        playerAudio.pause();
+    try {
+        await ensureAudioGraph();
+        if (playerAudio.paused) {
+            await playerAudio.play();
+        } else {
+            playerAudio.pause();
+        }
+    } catch (err) {
+        statusText.textContent = 'Lỗi phát âm thanh: ' + err.message;
     }
-});
-
-btnBack.addEventListener('click', () => {
-    if (!isFinite(playerAudio.duration)) return;
-    playerAudio.currentTime = Math.max(0, playerAudio.currentTime - 5);
-});
-
-btnForward.addEventListener('click', () => {
-    if (!isFinite(playerAudio.duration)) return;
-    playerAudio.currentTime = Math.min(playerAudio.duration, playerAudio.currentTime + 5);
-});
-
-seekBar.addEventListener('input', () => {
-    isSeeking = true;
-    if (isFinite(playerAudio.duration)) {
-        curTimeEl.textContent = formatTime((parseFloat(seekBar.value) / 100) * playerAudio.duration);
-    }
-});
-
-seekBar.addEventListener('change', () => {
-    if (isFinite(playerAudio.duration)) {
-        playerAudio.currentTime = (parseFloat(seekBar.value) / 100) * playerAudio.duration;
-    }
-    isSeeking = false;
-});
-
-playerAudio.addEventListener('loadedmetadata', () => {
-    durTimeEl.textContent = formatTime(playerAudio.duration);
 });
 
 playerAudio.addEventListener('timeupdate', () => {
-    if (!isSeeking && isFinite(playerAudio.duration) && playerAudio.duration > 0) {
-        seekBar.value = (playerAudio.currentTime / playerAudio.duration) * 100;
-        curTimeEl.textContent = formatTime(playerAudio.currentTime);
+    if (isFinite(playerAudio.duration)) {
+        timeDisplay.textContent = `${formatTime(playerAudio.currentTime)} / ${formatTime(playerAudio.duration)}`;
     }
 });
 
@@ -638,7 +443,6 @@ playerAudio.addEventListener('pause', () => {
 
 playerAudio.addEventListener('ended', () => {
     btnPlayPause.textContent = '▶ Phát';
-    seekBar.value = 0;
 });
 
 function normalizeSignal(y) {
@@ -723,32 +527,26 @@ function triggerDownload(samples, sampleRate, suffix) {
 
 function exportEffect(type) {
     if (!loadedSignal) {
-        exportStatus.textContent = 'Chưa có tín hiệu — Hãy nạp file .wav hoặc thu giọng nói trước!';
+        exportStatus.textContent = 'Chưa có tín hiệu — Hãy nạp file .wav hoặc thu giọng trước!';
         return;
     }
 
     const { samples, sampleRate } = loadedSignal;
+    const g = (currentEffect === type && currentGain > 0) ? currentGain : DEFAULT_GAINS[type];
     let y;
-    let label;
 
     if (type === 'echo') {
-        const g = parseFloat(echoSlider.value) > 0 ? parseFloat(echoSlider.value) : 0.5;
         y = runEchoOffline(samples, sampleRate, g);
-        label = `echo_g${g.toFixed(2)}`;
         exportStatus.textContent = `Đã xuất Echo (FIR, g = ${g.toFixed(2)})`;
     } else if (type === 'reverb') {
-        const g = parseFloat(reverbSlider.value) > 0 ? parseFloat(reverbSlider.value) : 0.85;
         y = runReverbOffline(samples, sampleRate, g);
-        label = `reverb_g${g.toFixed(2)}`;
         exportStatus.textContent = `Đã xuất Reverb (4-Comb IIR, g = ${g.toFixed(2)})`;
     } else if (type === 'flanger') {
-        const g = parseFloat(flangerSlider.value) > 0 ? parseFloat(flangerSlider.value) : 0.7;
         y = runFlangerOffline(samples, sampleRate, g);
-        label = `flanger_g${g.toFixed(2)}`;
         exportStatus.textContent = `Đã xuất Flanger (FIR LTV, g = ${g.toFixed(2)})`;
     }
 
-    triggerDownload(y, sampleRate, label);
+    triggerDownload(y, sampleRate, `${type}_g${g.toFixed(2)}`);
 }
 
 btnExportEcho.addEventListener('click', () => exportEffect('echo'));
@@ -756,4 +554,4 @@ btnExportReverb.addEventListener('click', () => exportEffect('reverb'));
 btnExportFlanger.addEventListener('click', () => exportEffect('flanger'));
 
 initVuMeter();
-applyPreset('karaoke');
+selectEffect('echo');
