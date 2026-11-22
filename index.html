@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Real-Time DSP Audio Effects</title>
+    <style>
+        * { box-sizing: border-box; font-family: system-ui, -apple-system, sans-serif; }
+        body {
+            margin: 0;
+            padding: 16px;
+            background: #0b1120;
+            color: #e2e8f0;
+            display: flex;
+            justify-content: center;
+        }
+        .card {
+            width: 100%;
+            max-width: 460px;
+            background: #1e293b;
+            border-radius: 14px;
+            padding: 20px;
+            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.4);
+        }
+        h1 {
+            font-size: 1.15rem;
+            text-align: center;
+            margin: 0 0 8px 0;
+            letter-spacing: 0.5px;
+        }
+        .warn {
+            background: #422006;
+            color: #fde68a;
+            border: 1px solid #a16207;
+            border-radius: 8px;
+            padding: 8px 10px;
+            font-size: 0.82rem;
+            margin-bottom: 14px;
+            text-align: center;
+        }
+        button {
+            width: 100%;
+            padding: 13px;
+            border: none;
+            border-radius: 10px;
+            font-size: 1rem;
+            font-weight: 600;
+            cursor: pointer;
+            background: #2563eb;
+            color: #fff;
+            margin-bottom: 16px;
+        }
+        button.active { background: #dc2626; }
+        .control { margin-bottom: 14px; }
+        label {
+            display: flex;
+            justify-content: space-between;
+            font-size: 0.9rem;
+            margin-bottom: 6px;
+            color: #cbd5e1;
+        }
+        select, input[type="range"] {
+            width: 100%;
+            padding: 10px;
+            border-radius: 8px;
+            border: 1px solid #475569;
+            background: #0f172a;
+            color: #f8fafc;
+            font-size: 0.95rem;
+        }
+        input[type="range"] { padding: 0; height: 28px; }
+        canvas {
+            width: 100%;
+            height: 160px;
+            background: #0f172a;
+            border-radius: 10px;
+            border: 1px solid #334155;
+            display: block;
+            margin-top: 10px;
+        }
+        .status {
+            margin-top: 12px;
+            font-size: 0.82rem;
+            color: #94a3b8;
+            text-align: center;
+            line-height: 1.5;
+        }
+        .status strong { color: #38bdf8; }
+    </style>
+</head>
+<body>
+    <div class="card">
+        <h1>REAL-TIME DSP AUDIO EFFECTS</h1>
+        <div class="warn">Use wired headphones before starting to prevent acoustic feedback howling.</div>
+
+        <button id="btnToggle">Start Real-Time Audio</button>
+
+        <div class="control">
+            <label for="effectSelect"><span>Effect Mode</span></label>
+            <select id="effectSelect">
+                <option value="dry">Dry (Bypass)</option>
+                <option value="echo">Echo (FIR, D = 0.3s)</option>
+                <option value="reverb">Reverb (4-Comb IIR, g &lt; 1)</option>
+                <option value="flanger">Flanger (FIR LTV, 1–5 ms)</option>
+            </select>
+        </div>
+
+        <div class="control">
+            <label for="gainSlider">
+                <span>Gain (g)</span>
+                <span id="gainVal">0.00</span>
+            </label>
+            <input type="range" id="gainSlider" min="0" max="1" step="0.05" value="0">
+        </div>
+
+        <canvas id="scopeCanvas" width="420" height="160"></canvas>
+
+        <div class="status">
+            <div>Status: <strong id="statusText">Stopped</strong></div>
+            <div id="metricsText">Fs: -- Hz | Frame: 128 samples</div>
+        </div>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>
