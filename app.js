@@ -110,7 +110,7 @@ async function ensureAudioGraph() {
         audioCtx = new AudioContextClass({ latencyHint: 'interactive' });
     }
     if (!workletLoaded) {
-        await audioCtx.audioWorklet.addModule('dsp-processor.js?v=3');
+        await audioCtx.audioWorklet.addModule('dsp-processor.js?v=4');
         workletLoaded = true;
     }
     if (!dspNode) {
@@ -236,6 +236,7 @@ function loadSignalIntoPlayer(samples, sampleRate, displayName, autoPlay = false
     playerAudio.pause();
     playerAudio.src = currentSourceUrl;
     playerAudio.load();
+    sendDspParams(true);
 
     const durSec = samples.length / sampleRate;
     timeDisplay.textContent = `00:00 / ${formatTime(durSec)}`;
@@ -459,37 +460,36 @@ function normalizeSignal(y) {
 
 function runEchoOffline(x, Fs, g) {
     const D = Math.round(0.3 * Fs);
-    const N = x.length + Math.round(1.0 * Fs);
+    const N = x.length;
     const y = new Float32Array(N);
     for (let n = 0; n < N; n++) {
-        const xn = n < x.length ? x[n] : 0;
-        const xDel = (n >= D && (n - D) < x.length) ? x[n - D] : 0;
-        y[n] = xn + g * xDel;
+        y[n] = x[n];
+        if (n >= D) {
+            y[n] += g * x[n - D];
+        }
     }
     return normalizeSignal(y);
 }
 
 function runReverbOffline(x, Fs, g) {
     const gSafe = Math.min(g, 0.95);
+    const wet = 0.4;
     const delays = COMB_DELAY_MS.map(ms => Math.max(1, Math.round((ms / 1000) * Fs)));
-    const N = x.length + Math.round(2.0 * Fs);
-    const y = new Float32Array(N);
-    const combs = delays.map(() => new Float32Array(N));
+    const N = x.length;
+    const v = new Float32Array(N);
 
     for (let k = 0; k < delays.length; k++) {
         const D = delays[k];
-        const c = combs[k];
-        for (let n = 0; n < N; n++) {
-            const xDel = (n >= D && (n - D) < x.length) ? x[n - D] : 0;
-            const cDel = n >= D ? c[n - D] : 0;
-            c[n] = xDel + gSafe * cDel;
+        const c = new Float32Array(N);
+        for (let n = D; n < N; n++) {
+            c[n] = x[n - D] + gSafe * c[n - D];
+            v[n] += c[n] / 4;
         }
     }
 
+    const y = new Float32Array(N);
     for (let n = 0; n < N; n++) {
-        const xn = n < x.length ? x[n] : 0;
-        const sum = combs[0][n] + combs[1][n] + combs[2][n] + combs[3][n];
-        y[n] = xn + 0.25 * sum;
+        y[n] = (1 - wet) * x[n] + wet * v[n];
     }
     return normalizeSignal(y);
 }
@@ -498,15 +498,10 @@ function runFlangerOffline(x, Fs, g) {
     const N = x.length;
     const y = new Float32Array(N);
     for (let n = 0; n < N; n++) {
-        const d = (Fs / 1000) * (3.0 + 2.0 * Math.sin(2 * Math.PI * 0.25 * n / Fs));
-        const idx = n - d;
-        const i1 = Math.floor(idx);
-        if (i1 >= 0 && i1 + 1 < N) {
-            const frac = idx - i1;
-            const xDel = (1 - frac) * x[i1] + frac * x[i1 + 1];
-            y[n] = x[n] + g * xDel;
-        } else {
-            y[n] = x[n];
+        const d = Math.round((Fs / 1000) * (3 + 2 * Math.sin(2 * Math.PI * 0.25 * n / Fs)));
+        y[n] = x[n];
+        if (n >= d) {
+            y[n] += g * x[n - d];
         }
     }
     return normalizeSignal(y);

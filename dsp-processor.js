@@ -29,10 +29,12 @@ class RealtimeDspProcessor extends AudioWorkletProcessor {
 
     resetBuffers() {
         this.xBuf.fill(0);
+        this.xIdx = 0;
         for (let k = 0; k < this.combBufs.length; k++) {
             this.combBufs[k].fill(0);
             this.combPtrs[k] = 0;
         }
+        this.lfoPhase = 0;
     }
 
     process(inputs, outputs) {
@@ -44,19 +46,16 @@ class RealtimeDspProcessor extends AudioWorkletProcessor {
         const outR = output[1];
         const blockSize = outL.length;
 
-        if (!input || !input[0]) {
-            outL.fill(0);
-            if (outR) outR.fill(0);
-            return true;
-        }
+        const hasInput = input && input[0];
+        const inL = hasInput ? input[0] : null;
+        const inR = hasInput ? input[1] : null;
 
-        const inL = input[0];
-        const inR = input[1];
-        const echoDelay = Math.min(this.xLen - 2, Math.max(1, Math.round(0.3 * sampleRate)));
-        const gRevSafe = Math.min(this.gain, 0.95);
+        const echoDelay = Math.round(0.3 * sampleRate);
+        const gRev = Math.min(this.gain, 0.95);
+        const wet = 0.4;
 
         for (let i = 0; i < blockSize; i++) {
-            const x = inR ? 0.5 * (inL[i] + inR[i]) : inL[i];
+            const x = inL ? (inR ? 0.5 * (inL[i] + inR[i]) : inL[i]) : 0;
             this.xBuf[this.xIdx] = x;
             let y = x;
 
@@ -64,34 +63,29 @@ class RealtimeDspProcessor extends AudioWorkletProcessor {
                 const readIdx = (this.xIdx - echoDelay + this.xLen) % this.xLen;
                 y = x + this.gain * this.xBuf[readIdx];
             } else if (this.effect === 'reverb') {
-                let sumComb = 0;
+                let v = 0;
                 for (let k = 0; k < this.combBufs.length; k++) {
                     const Dk = this.combDelays[k];
                     const ptr = this.combPtrs[k];
                     const cPrev = this.combBufs[k][ptr];
                     const xDelIdx = (this.xIdx - Dk + this.xLen) % this.xLen;
-                    const cOut = this.xBuf[xDelIdx] + gRevSafe * cPrev;
+                    const cOut = this.xBuf[xDelIdx] + gRev * cPrev;
                     this.combBufs[k][ptr] = cOut;
                     this.combPtrs[k] = (ptr + 1) % Dk;
-                    sumComb += cOut;
+                    v += cOut / 4;
                 }
-                y = x + 0.25 * sumComb;
+                y = (1 - wet) * x + wet * v;
             } else if (this.effect === 'flanger') {
-                const d = (sampleRate / 1000) * (3.0 + 2.0 * Math.sin(this.lfoPhase));
-                const dInt = Math.floor(d);
-                const frac = d - dInt;
-                const idx1 = (this.xIdx - dInt + this.xLen) % this.xLen;
-                const idx2 = (this.xIdx - dInt - 1 + this.xLen) % this.xLen;
-                const xDel = (1 - frac) * this.xBuf[idx1] + frac * this.xBuf[idx2];
-                y = x + this.gain * xDel;
+                const d = Math.round((sampleRate / 1000) * (3 + 2 * Math.sin(this.lfoPhase)));
+                const readIdx = (this.xIdx - d + this.xLen) % this.xLen;
+                y = x + this.gain * this.xBuf[readIdx];
 
                 this.lfoPhase += this.lfoInc;
                 if (this.lfoPhase >= 2 * Math.PI) this.lfoPhase -= 2 * Math.PI;
             }
 
-            const yOut = Math.tanh(y);
-            outL[i] = yOut;
-            if (outR) outR[i] = yOut;
+            outL[i] = y;
+            if (outR) outR[i] = y;
 
             this.xIdx = (this.xIdx + 1) % this.xLen;
         }
